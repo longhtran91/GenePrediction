@@ -1,5 +1,9 @@
 #include "LocalAlignment.h"
 
+
+#include <iomanip>
+
+
 using namespace std;
 
 LocalAlignment::LocalAlignment()
@@ -7,103 +11,224 @@ LocalAlignment::LocalAlignment()
 
 }
 
-LocalAlignment::LocalAlignment(const string &dna_sequence_filename, const string &dna_template_filename)
+/*LocalAlignment::LocalAlignment(const LocalAlignment &la)
 {
-	this->read_config("var.config");
-	this->dna_template = read_file(dna_template_filename);
-	this->dna_sequence = read_file(dna_sequence_filename);
+    this->exons = la.exons;
+    this->dna_sequence = la.dna_sequence;
+    this->dna_template = la.dna_template;
+    this->trace_matrix
+    this->trace_matrix = la.trace_matrix;
+    this->row_size = la.row_size;
+    this->col_size = la.col_size;
+    this->threshold = la.threshold;
+    this->match = la.match;
+    this->mismatch = la.mismatch;
+    this->match = la.match;
+    this->gap = la.gap;
+}*/
 
-	this->i_size = dna_template.length() + 1;
-	this->j_size = dna_sequence.length() + 1;
-	int **scores_matrix = new int *[this->i_size];
-	unordered_set<array<unsigned int, 2>> **backtracking_matrix = new unordered_set<array<unsigned int, 2>> *[this->i_size];
-	
+LocalAlignment::LocalAlignment(const string &dna_template, const string &dna_sequence, const int &match, const int &mismatch, const int &gap, const int &threshold)
+{
+    //this->read_config("var.config");
+	this->dna_template = dna_template;
+	this->dna_sequence = dna_sequence;
+    this->match = match;
+    this->mismatch = mismatch;
+    this->gap = gap;
+    this->threshold = threshold;
+	this->row_size = dna_template.length() + 1;
+	this->col_size = dna_sequence.length() + 1;
+	unsigned int **scores_matrix = new unsigned int *[this->row_size];
+	unordered_set<Coordinate> **origins_matrix = new unordered_set<Coordinate> *[this->row_size];
+	this->trace_matrix = new unsigned int *[this->row_size];
+
 	//fill the rest of matrix by dynamic programming local alignment
-	for (unsigned int i = 0; i < this->i_size; i++)
+	for (unsigned int row = 0; row < this->row_size; ++row)
 	{
-		scores_matrix[i] = new int[this->j_size];
-		backtracking_matrix[i] = new unordered_set<array<unsigned int, 2>>[this->j_size];
+		//auto start = chrono::high_resolution_clock::now();
+		scores_matrix[row] = new unsigned int[this->col_size];
+		origins_matrix[row] = new unordered_set<Coordinate>[this->col_size];
+		trace_matrix[row] = new unsigned int[this->col_size];
 
 		//rolling delete used/obsolete rows
-		if (i >= 2)
+		if (row >= 2)
 		{
-				delete[] scores_matrix[i-2];
-				delete[] backtracking_matrix[i - 2];
+			delete[] scores_matrix[row - 2];
+			delete[] origins_matrix[row - 2];
 		}
 
-		for (unsigned int j = 0; j < this->j_size; j++)
+		for (unsigned int col = 0; col < this->col_size; ++col)
 		{
+
 			//initialize first row and column to be 0
-			if (i == 0 || j == 0)
+			if (row == 0 || col == 0)
 			{
-				scores_matrix[i][j] = 0;
-				backtracking_matrix[i][j].insert({ i, j });
-				continue; 
+				scores_matrix[row][col] = 0;
+				trace_matrix[row][col] = NULL;
+				continue;
 			}
 
-			bool free_ride = true;
 			int vertical_score, horizontal_score, diagonal_score;
 
-			horizontal_score = scores_matrix[i][j-1] + this->gap;
-			vertical_score = scores_matrix[i-1][j] + this->gap;
+			horizontal_score = scores_matrix[row][col - 1] + this->gap;
+			vertical_score = scores_matrix[row - 1][col] + this->gap;
 
-			if (dna_sequence[j - 1] == dna_template[i - 1])	diagonal_score = scores_matrix[i - 1][j - 1] + this->match;
-			else diagonal_score = scores_matrix[i - 1][j - 1] + this->mismatch;
+			if (dna_sequence[col - 1] == dna_template[row - 1])	diagonal_score = scores_matrix[row - 1][col - 1] + this->match;
+			else diagonal_score = scores_matrix[row - 1][col - 1] + this->mismatch;
 
-            int scores[4] = {0, vertical_score, horizontal_score, diagonal_score };
-			unsigned int score = *max_element(scores, scores + 4);
+			unsigned int score = max({ 0, vertical_score, horizontal_score, diagonal_score });
+			scores_matrix[row][col] = score;
 
+			trace_matrix[row][col] = 0;
 			if (score == vertical_score)
 			{
-				free_ride = false;
-				backtracking_matrix[i][j].insert(backtracking_matrix[i-1][j].cbegin(), backtracking_matrix[i - 1][j].cend());
+				trace_matrix[row][col] += VERTICAL_PATH;
+				if (origins_matrix[row - 1][col].empty()) origins_matrix[row][col].insert(Coordinate(row, col));
+				else origins_matrix[row][col].insert(origins_matrix[row - 1][col].cbegin(), origins_matrix[row - 1][col].cend());
 			}
-
-			if (score == horizontal_score)
-			{
-				free_ride = false;
-				backtracking_matrix[i][j].insert(backtracking_matrix[i][j-1].cbegin(), backtracking_matrix[i][j-1].cend());
-			}
-
 			if (score == diagonal_score)
 			{
-				free_ride = false;
-				backtracking_matrix[i][j].insert(backtracking_matrix[i-1][j - 1].cbegin(), backtracking_matrix[i-1][j - 1].cend());
+				trace_matrix[row][col] += DIAGONAL_PATH;
+				if (origins_matrix[row - 1][col - 1].empty()) origins_matrix[row][col].insert(Coordinate(row, col));
+				else origins_matrix[row][col].insert(origins_matrix[row - 1][col - 1].cbegin(), origins_matrix[row - 1][col - 1].cend());
+			}
+			if (score == horizontal_score)
+			{
+				trace_matrix[row][col] += HORIZONTAL_PATH;
+				if (origins_matrix[row][col - 1].empty()) origins_matrix[row][col].insert(Coordinate(row, col));
+				else origins_matrix[row][col].insert(origins_matrix[row][col - 1].cbegin(), origins_matrix[row][col - 1].cend());
 			}
 
-			if (free_ride)  backtracking_matrix[i][j].insert({ i, j });
-
-			scores_matrix[i][j] = score;
-			
 			if (score >= this->threshold)
 			{
-				for (const auto& elem : backtracking_matrix[i][j]) {
-					this->exons.insert({ (elem[1] == 0) ? 1 : elem[1],j, score});
+				for (const auto& elem : origins_matrix[row][col])
+				{
+					this->exons.push_back(Interval_Coordinate(Coordinate(elem.row, elem.col), Coordinate(row, col), score));
 				}
 			}
-		}
+		}		
 	}
-
-	for (int k = 1; k < 3; k++)
+	for (int k = 1; k < 3; ++k)
 	{
-		delete[] scores_matrix[this->i_size - k];
-		delete[] backtracking_matrix[this->i_size - k];
+		delete[] scores_matrix[this->row_size - k];
+		delete[] origins_matrix[this->row_size - k];
 	}
 	delete[] scores_matrix;
-	delete[] backtracking_matrix;
+	delete[] origins_matrix;
 }
-
 LocalAlignment::~LocalAlignment()
 {
-
+	for (unsigned int row = 0; row < this->row_size; ++row)
+	{
+		delete[] this->trace_matrix[row];
+	}
+	delete[] this->trace_matrix;
 }
 
-unordered_set<array<unsigned, 3>> LocalAlignment::getExons() const
+list<Interval_Coordinate> LocalAlignment::getExons() const
 {
 	return this->exons;
 }
 
-void LocalAlignment::read_config(const string &fileName)
+list<array<string, 3>> LocalAlignment::print_alignment(const Coordinate &start, const Coordinate &end)
+{
+	list<array<string, 3>> result;
+	string ali_template;
+	string ali_sequence;
+	string mid_line;
+	int index = 0;
+	unsigned int trace = this->trace_matrix[end.row][end.col];
+	if ((trace - trace % 2) % 4 == 2) this->trace_matrix[end.row][end.col] = 2;
+	if (trace == NULL)	return result;
+
+	if (end == start)
+	{
+		{
+			char d = (this->dna_template[end.row - 1] == this->dna_sequence[end.col - 1] ? MATCH_CHAR : MISMATCH_CHAR);
+			result.push_back({ string(1, this->dna_template[end.row - 1]), string(1, d),string(1, this->dna_sequence[end.col - 1]) });
+			return result;
+		}
+	}
+
+	stack<Coordinate> s;
+	stack<int> si;
+	si.push(index);
+	s.push(end);
+	Coordinate curr;
+	Coordinate pre_curr;
+	Coordinate tmp_curr;
+	while (!s.empty())
+	{
+		bool col_gap = false, dead_end = false;
+		curr = s.top();
+		pre_curr = s.top();
+		index = si.top();
+		trace = this->trace_matrix[curr.row][curr.col];
+		si.pop();
+		s.pop();
+
+		while (trace != NULL && pre_curr != start && !dead_end)
+		{
+			tmp_curr = curr;
+			int size = ali_template.size();
+			ali_template = ali_template.substr(size - index, size);
+			ali_sequence = ali_sequence.substr(size - index, size);
+            mid_line = mid_line.substr(size - index, size);
+
+			if (trace % 2 == VERTICAL_PATH)
+			{
+				trace -= 1;
+				col_gap = true;
+				ali_template.insert(0, string(1, this->dna_template[curr.row - 1]));
+				ali_sequence.insert(0, string(1, GAP_CHAR));
+				mid_line.insert(0, string(1, SPACE_CHAR));
+				--curr.row;
+			}
+			else if (trace % 4 == DIAGONAL_PATH)
+			{
+				trace -= 2;
+				col_gap = false;
+				char d = (this->dna_template[curr.row - 1] == this->dna_sequence[curr.col - 1] ? MATCH_CHAR : MISMATCH_CHAR);
+				ali_template.insert(0, string(1, this->dna_template[curr.row - 1]));
+				ali_sequence.insert(0, string(1, this->dna_sequence[curr.col - 1]));
+				mid_line.insert(0, string(1, d));
+				--curr.row;
+				--curr.col;
+			}
+			else if (trace == HORIZONTAL_PATH)
+			{
+				if (col_gap) dead_end = true;
+				else
+				{
+					trace -= 4;
+					col_gap = false;
+					ali_template.insert(0, string(1, GAP_CHAR));
+					ali_sequence.insert(0, string(1, this->dna_sequence[curr.col - 1]));
+					mid_line.insert(0, string(1, SPACE_CHAR));
+					--curr.col;
+				}
+			}
+
+			if (trace > 0 && !dead_end)
+			{
+				this->trace_matrix[tmp_curr.row][tmp_curr.col] = trace;
+				s.push(tmp_curr);
+				si.push(index);
+			}
+			pre_curr = tmp_curr;
+			trace = this->trace_matrix[curr.row][curr.col];
+			++index;
+		}
+
+		if (pre_curr == start)
+		{
+			result.push_back({ ali_template, mid_line, ali_sequence });
+		}
+	}
+	return result;
+}
+
+/*void LocalAlignment::read_config(const string &fileName)
 {
 	ifstream cFile(fileName);
 	if (cFile.is_open())
@@ -127,18 +252,4 @@ void LocalAlignment::read_config(const string &fileName)
 	else {
 		cerr << "Couldn't open config file for reading.\n";
 	}
-}
-
-string LocalAlignment::read_file(const string &fileName)
-{
-	string data;
-	string line;
-	ifstream ifs(fileName.c_str());
-
-	while (getline(ifs, line))
-	{
-		if (line[0] == '>') continue;
-		data += line;
-	}
-	return data;
-}
+}*/

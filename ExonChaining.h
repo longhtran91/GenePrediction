@@ -1,24 +1,18 @@
 #pragma once
-#include <array>
-//#include <algorithm>
 #include <map>
-#include <set>
-#include <unordered_set>
-#include <stack>
-
-
-using namespace std;
+#include <list>
+#include <vector>
+#include <algorithm>
+#include "Coordinate_Utility.h"
 
 class ExonChaining
 {
 private:
-	stack<array<unsigned int, 3>> intervals;
+	std::list<Interval_Coordinate> intervals;
 
 public:
 	ExonChaining();
-	ExonChaining(const unordered_set<array<unsigned int, 3>> &exons);
-	stack<array<unsigned int, 3>> get_intervals();
+	ExonChaining(const std::list<Interval_Coordinate> &exons);
+	std::list<Interval_Coordinate> get_intervals();
 	~ExonChaining();
-	template <typename T>
-	T find_max_itr(T start, T end);
 };

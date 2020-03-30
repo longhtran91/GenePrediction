@@ -1,4 +1,5 @@
-QT       += core gui
+QT      += core gui
+CONFIG  += console
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
@@ -22,6 +23,7 @@ SOURCES += \
     mainwindow.cpp
 
 HEADERS += \
+    Coordinate_Utility.h \
     ExonChaining.h \
     LocalAlignment.h \
     mainwindow.h

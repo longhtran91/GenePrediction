@@ -7,88 +7,148 @@ ExonChaining::ExonChaining()
 
 }
 
-ExonChaining::ExonChaining(const unordered_set<array<unsigned int, 3>> &exons)
+ExonChaining::ExonChaining(const list<Interval_Coordinate> &exons)
 {
-
-	multimap<unsigned int, array<unsigned int, 2>> right2leftweight;
-
 	//create ordered vertices vector & create right2leftweight multimap
-	set<unsigned int> temp_set; // to temporary store all the vertices to a set
-	for (const auto &elem : exons) {
-		right2leftweight.insert(pair<unsigned int, array<unsigned int, 2>>(elem[1], { elem[0],  elem[2] }));
-		temp_set.insert(elem[0]);
-		temp_set.insert(elem[1]);
-	}
-	unsigned int size = temp_set.size();
-
-	vector<unsigned int> ordered_vertices;
-	ordered_vertices.reserve(size);
-	ordered_vertices.assign(temp_set.begin(), temp_set.end());
-	unsigned int *scores = new unsigned int[size];  //create ordered verticies vector from set to remove duplicate and sort by default
-
-
-	//fill scores vector
-	for (unsigned int i = 1; i < size; i++)
+	multimap<Coordinate, Coordinate_Score> rightC2leftCweight;
+	multimap<unsigned int, Coordinate_Score> right2leftweight;	
+	vector<Coordinate> ordered_vertices;
+	for (const auto &elem : exons)
 	{
-		unsigned int right = (ordered_vertices)[i];
-
-		//find highest score of multiples intervals with the same rights
-		pair <multimap<unsigned int, array<unsigned int, 2>>::const_iterator, multimap<unsigned int, array<unsigned int, 2>>::const_iterator> itr_right2lw; //pair of multimap iterators
-		itr_right2lw = right2leftweight.equal_range(right); //find all the lefts-weights of current right
-
-		if (itr_right2lw.first == itr_right2lw.second) //if the index is left
-		{
-			(scores)[i] = (scores)[i - 1];
-		}
-		else //if the index is right
-		{
-			multimap<unsigned int, array<unsigned int, 2>>::const_iterator max_itr = find_max_itr(itr_right2lw.first, itr_right2lw.second);
-			unsigned int left = max_itr->second[0];
-			unsigned int weight = max_itr->second[1];
-
-			//find the left index
-			unsigned int left_index = lower_bound((ordered_vertices).begin(), (ordered_vertices).end(), left) - (ordered_vertices).begin();
-
-			//find max score of all possible scores
-			unsigned int possible_scores[2] = { (scores)[left_index] + weight , (scores)[i - 1] };
-			(scores)[i] = *max_element(possible_scores, possible_scores + 2);
-		}
+		rightC2leftCweight.insert({ elem.end, Coordinate_Score(elem.start, elem.score) });
+		right2leftweight.insert({ elem.end.col, Coordinate_Score(elem.start, elem.score) });
+		ordered_vertices.push_back(elem.start);
+		ordered_vertices.push_back(elem.end);
 	}
+	sort(ordered_vertices.begin(), ordered_vertices.end());
+	ordered_vertices.erase(unique(ordered_vertices.begin(), ordered_vertices.end()), ordered_vertices.end());
+	unsigned int size = ordered_vertices.size();
+	ordered_vertices.reserve(size);
+	vector<unsigned int> scores(size);
+	
+	unsigned int pre_j = 0;
+	for (unsigned int i = 1; i < size; ++i)
+	{
+		unsigned int right_j = ordered_vertices[i].col;
+		if (right_j == pre_j)
+		{ 
+			scores[i] = scores[i - 1];
+			continue;
+		}
 
+		const auto &itr_right = right2leftweight.equal_range(right_j);
+		if (itr_right.first == itr_right.second) //current index is left end
+		{
+			scores[i] = scores[i - 1];
+		}
+		else //current index is right
+		{
+			//find all possible lefts
+			auto itr_left = itr_right.first;
+			unsigned int max_weight = 0;
+			while (itr_left != itr_right.second)
+			{
+				unsigned int left = itr_left->second.c.col;
+				unsigned int itv_weight = itr_left->second.score;
+				const auto &left_itr_index = lower_bound(ordered_vertices.cbegin(), ordered_vertices.cbegin() + i, Coordinate(0, left),
+																											[](const Coordinate &lhs, Coordinate const & rhs)
+																											{return lhs.col < rhs.col; });
+				unsigned int left_index = distance(ordered_vertices.cbegin(), left_itr_index);
+				if (scores[left_index] + itv_weight > max_weight)
+				{
+					max_weight = scores[left_index] + itv_weight;
+				}
+				++itr_left;
+			}
+			scores[i] = max({ max_weight, scores[i - 1] });
+		}
+		pre_j = right_j;
+	}
+	
 	//backtrack scores to get paths
 	int index = size - 1;
-	unsigned int right, left, weight;
-
+	Coordinate right, left;
+	unsigned int weight;
 	while (index >= 0)
 	{
-		right = (ordered_vertices)[index];
-		pair <multimap<unsigned int, array<unsigned int, 2>>::const_iterator, multimap<unsigned int, array<unsigned int, 2>>::const_iterator> itr_right2lw; //pair of multimap iterators
-		itr_right2lw = right2leftweight.equal_range(right); //find all the lefts-weights of current right
-		if (itr_right2lw.first == itr_right2lw.second) //if the index is left
+		right = ordered_vertices[index];
+		const auto &itr_right = rightC2leftCweight.find(right); //find all the lefts-weights of current right
+		if (itr_right == rightC2leftCweight.cend()) //if the current index is left
 		{
-			index--;
+			//look for any right end at the same j
+			const auto &itr_right = right2leftweight.find(right.row);
+			if (itr_right == right2leftweight.cend()) //no right end found
+			{
+				--index;
+			}
+			else //right end at the same j found
+			{
+				unsigned int tempw = scores[index];			
+				
+				//find all coordinates including left & right at this j
+				auto itr_cor = equal_range(ordered_vertices.cbegin(), ordered_vertices.cend(), Coordinate(0, right.row), [](const Coordinate &lhs, Coordinate const & rhs)
+																													{return lhs.col < rhs.col; });
+				Coordinate new_right;
+				Coordinate new_left;
+				unsigned int max_itv_weight = 0;
+				auto cor = itr_cor.first;
+				while (itr_cor.first != itr_cor.second)
+				{
+					auto itr_rights = rightC2leftCweight.equal_range(*itr_cor.first); //find all the rights
+					while (itr_rights.first != itr_rights.second) //find rights with highest interval score
+					{
+						if (itr_rights.first->second.score > max_itv_weight)
+						{
+							cor = itr_cor.first;
+							new_right = itr_rights.first->first;
+							new_left = itr_rights.first->second.c;
+							max_itv_weight = itr_rights.first->second.score;
+						}
+						++itr_rights.first;
+					}
+					++itr_cor.first;
+
+				}
+
+				//const auto &itr_new_right = rightC2leftCweight.find(new_right);
+				unsigned int new_weight = max_itv_weight;
+                //const auto &new_left_itr = lower_bound(ordered_vertices.cbegin(), cor, new_left);
+				unsigned int new_left_index = distance(ordered_vertices.cbegin(), cor);
+				if (scores[new_left_index] + new_weight == tempw)
+				{
+					//add the interval
+					this->intervals.push_front(Interval_Coordinate(new_left, new_right, new_weight));
+					index = new_left_index; //go to left as next
+				}
+				else
+				{
+					--index;;
+				}
+			}
+				
 		}
 		else //if the index is right
 		{
-			multimap<unsigned int, array<unsigned int, 2>>::const_iterator max_itr = find_max_itr(itr_right2lw.first, itr_right2lw.second);
-			left = max_itr->second[0];
-			weight = max_itr->second[1];
-			unsigned left_index = lower_bound((ordered_vertices).begin(), (ordered_vertices).end(), left) - (ordered_vertices).begin();
-			unsigned int test_score = (scores)[left_index] + weight; //test_score to test it against the score in the scores vector
-			unsigned int score = (scores)[index]; //score in the scores vector
+			//find max score of this right
+			left = itr_right->second.c;
+			weight = itr_right->second.score;
+			const auto &left_itr = lower_bound(ordered_vertices.cbegin(), ordered_vertices.cbegin() + index, left);
+
+			unsigned int left_index = distance(ordered_vertices.cbegin(), left_itr);
+			unsigned int test_score = scores[left_index] + weight; //test_score to test it against the score in the scores vector
+			unsigned int score = scores[index]; //score in the scores vector
 			if (test_score == score) // if test_score = score at this position, use this interval
 			{
 				//add the interval
-				this->intervals.push({ left, right, weight });
+				this->intervals.push_front(Interval_Coordinate(left, right, weight));
 				index = left_index; //go to left as next
 			}
 			else
 			{
-				index--;
+				--index;
 			}
 		}
 	}
-    delete[] scores;
 }
 
 ExonChaining::~ExonChaining()
@@ -96,23 +156,7 @@ ExonChaining::~ExonChaining()
 
 }
 
-template <typename T>
-T ExonChaining::find_max_itr(T start, T end)
-{
-	T max_itr = start;
-	unsigned int max_score = max_itr->second[1];
-	for (T itr = start; itr != end; itr++)
-	{
-		if (itr->second[1] > max_score)
-		{
-			max_score = itr->second[1];
-			max_itr = itr;
-		}
-	}
-	return max_itr;
-}
-
-stack<array<unsigned int, 3>> ExonChaining::get_intervals()
+list<Interval_Coordinate> ExonChaining::get_intervals()
 {
 	return this->intervals;
 }

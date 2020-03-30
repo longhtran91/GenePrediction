@@ -1,55 +1,40 @@
 #pragma once
-#include <array>
 #include <algorithm>
 #include <fstream>
-#include <unordered_set>
 #include <sstream>
 #include <iostream>
+#include <list>
+#include <vector>
+#include <unordered_set>
+#include <array>
+#include <stack>
+#include "Coordinate_Utility.h"
 
-#define DIAGONAL_PATH 'd'
-#define VERTICAL_PATH 'u'
-#define HORIZONTAL_PATH 'l'
-
-using namespace std;
-namespace std
-{
-	template<typename T, size_t N>
-	struct hash<array<T, N> >
-	{
-		typedef array<T, N> argument_type;
-		typedef size_t result_type;
-
-		result_type operator()(const argument_type& a) const
-		{
-			hash<T> hasher;
-			result_type h = 0;
-			for (result_type i = 0; i < N; ++i)
-			{
-				h = h * 31 + hasher(a[i]);
-			}
-			return h;
-		}
-	};
-}
+#define DIAGONAL_PATH 2
+#define VERTICAL_PATH 1
+#define HORIZONTAL_PATH 4
+#define MATCH_CHAR '|'
+#define MISMATCH_CHAR '.'
+#define SPACE_CHAR ' '
+#define GAP_CHAR '-'
 
 class LocalAlignment
 {
 
 private:
-
-	unordered_set<array<unsigned, 3>> exons;
-	string dna_sequence;
-	string dna_template;
-	unsigned int i_size, j_size, threshold;
-	int match, mismatch, gap;
-
-	string read_file(const string &fileName);
-	void read_config(const string &fileName);
-
+	std::list<Interval_Coordinate> exons;
+	std::string dna_sequence;
+	std::string dna_template;
+	unsigned int  **trace_matrix;
+    unsigned int row_size, col_size;
+    int match, mismatch, gap, threshold;
+    //void read_config(const std::string &fileName);
 
 public:
 	LocalAlignment();
-	LocalAlignment(const string &dna_sequence_filename, const string &dna_template_filename);
+    LocalAlignment(const std::string &dna_sequence, const std::string &dna_template, const int &match, const int &mismatch, const int &gap, const int &threshold);
+    //LocalAlignment(const LocalAlignment &la);
 	~LocalAlignment();
-	unordered_set<array<unsigned, 3>> getExons() const;
+	std::list<Interval_Coordinate> getExons() const;
+	std::list<std::array<std::string, 3>> print_alignment(const Coordinate &start, const Coordinate &end);	
 };
