@@ -8,6 +8,7 @@ MainWindow::MainWindow(QWidget *parent)
     ui->setupUi(this);
     ui->tbl_result->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     ui->txt_threshold->setValidator(new QIntValidator(ui->txt_threshold));
+    ui->btn_find_exons->setDisabled(true);
     connect(ui->tbl_result, SIGNAL(cellDoubleClicked(int,int)), this, SLOT(tableItemDoubleClicked(int,int)));
 }
 
@@ -34,12 +35,16 @@ void MainWindow::on_btn_browseDNATemplate_file_clicked()
 }
 
 void MainWindow::on_btn_align_clicked()
-{
-    if (this->reRunLA)
+{    
+    if (this->sequence_path != ui->txt_UnknownDNAS_path->text()
+            || this->dna_path != ui->txt_mRNA_path->text()
+            || this->match != ui->spBox_match->value()
+            || this->mismatch != ui->spBox_mismatch->value()
+            || this->gap != ui->spBox_gap->value()
+            || this->threshold != ui->txt_threshold->text())
     {
         QString dna_template = "";
         QString dna_sequence = "";
-
 
         QFile sequence_file(ui->txt_UnknownDNAS_path->text());
         if (!sequence_file.open(QIODevice::ReadOnly | QIODevice::Text))
@@ -55,47 +60,126 @@ void MainWindow::on_btn_align_clicked()
             return;
         }
 
+        //1% progress
         QTextStream in_seq(&sequence_file);
         while (!in_seq.atEnd())
         {
-            dna_sequence += in_seq.readLine();
+            QString temp = in_seq.readLine();
+            if (temp[0] == '>') continue;
+            dna_sequence += temp;
         }
         sequence_file.close();
 
         QTextStream in_tpl(&dna_file);
         while (!in_tpl.atEnd())
         {
-            dna_template += in_tpl.readLine();
+            QString temp = in_tpl.readLine();
+            if (temp[0] == '>') continue;
+            dna_template += temp;
         }
-        if (this->la) delete this->la;
-        this->la = new LocalAlignment(dna_template.toStdString(), dna_sequence.toStdString(),
-                                      ui->spBox_match->text().toInt(), ui->spBox_mismatch->text().toInt(),
-                                      ui->spBox_gap->text().toInt(), ui->txt_threshold->text().toInt());
-        qDebug() << "rerun local alignment true";
-        this->reRunEC = true;
-    }
-    populateTable(la->getExons());
-    ui->ptxt_alignment->clear();
-    this->reRunLA = false;
 
+        //Progress diaglog
+        QProgressDialog progress("Alignment in progress...", "Cancel", 0, dna_template.toStdString().size()*dna_sequence.toStdString().size()-1, this);
+        progress.setMinimumDuration(100);
+        progress.setWindowModality(Qt::WindowModal);
+
+        clearTable();
+        if (this->la) delete this->la;
+        //98% progress
+        this->la = new LocalAlignment(dna_template.toStdString(), dna_sequence.toStdString(),
+                                      ui->spBox_match->value(), ui->spBox_mismatch->value(),
+                                      ui->spBox_gap->value(), ui->txt_threshold->text().toInt(), progress);
+        if (!progress.wasCanceled())
+        {
+            if (la->getExons().size() ==0)
+            {
+                QMessageBox::information(this, tr("Nothing found"), tr("There is no result!"));
+                return;
+            }
+            else
+            {
+                this->sequence_path = ui->txt_UnknownDNAS_path->text();
+                this->dna_path = ui->txt_mRNA_path->text();
+                this->match = ui->spBox_match->value();
+                this->mismatch = ui->spBox_mismatch->value();
+                this->gap = ui->spBox_gap->value();
+                this->threshold = ui->txt_threshold->text();
+
+                qDebug() << "populate new data" << endl;
+                populateTable(la->getExons());
+                ui->btn_find_exons->setEnabled(true);
+                this->reRunEC = true;
+            }
+
+        }
+        else
+        {
+            qDebug() << "cancelled" << endl;
+        }
+
+    }
+    else
+    {
+        if (this->tableValue != 1)
+        {
+            clearTable();
+            populateTable(la->getExons());
+            ui->btn_find_exons->setEnabled(true);
+            qDebug() << "populate existing data" << endl;
+        }
+        else
+        {
+            qDebug() << "nothing todo" << endl;
+        }
+    }
+    this->tableValue = 1;
 }
 
 void MainWindow::on_btn_find_exons_clicked()
-{
-    if (!this->la)
+{    
+    if (!this->la || this->la->getExons().size() == 0)
     {
         QMessageBox::critical(this, tr("Error finding exons"), tr("The two sequences are not aligned yet"));
         return;
-    }
+    }    
+
     if (this->reRunEC)
     {
+        //Progress diaglog
+        QProgressDialog progress("Exon chaining in progress...", "Cancel", 0, 100, this);
+        progress.setMinimumDuration(100);
+        progress.setWindowModality(Qt::WindowModal);
+
+        clearTable();
         if (this->ec) delete this->ec;
-        this->ec = new ExonChaining(this->la->getExons());
-        qDebug() << "rerun exon chaining true";
+        this->ec = new ExonChaining(this->la->getExons(), progress);
+        progress.setValue(100);
+        if (ec->get_intervals().size() == 0)
+        {
+            QMessageBox::information(this, tr("Nothing found"), tr("There is no result!"));
+            return;
+        }
+        else
+        {
+            populateTable(ec->get_intervals());
+            qDebug() << "populate new data" << endl;
+        }
+        this->reRunEC = false;
     }
-    populateTable(ec->get_intervals());
-    ui->ptxt_alignment->clear();
-    this->reRunEC = false;
+    else
+    {
+        if (this->tableValue != 2)
+        {
+            clearTable();
+            populateTable(ec->get_intervals());
+            qDebug() << "populate existing data" << endl;
+        }
+        else
+        {
+            qDebug() << "nothing todo" << endl;
+        }
+    }
+    this->tableValue = 2;
 }
 
 void MainWindow::tableItemDoubleClicked(int row, int col)
@@ -109,9 +193,6 @@ void MainWindow::tableItemDoubleClicked(int row, int col)
         Coordinate start(start_s[0].toInt(), start_s[1].toInt());
         Coordinate end(end_s[0].toInt(), end_s[1].toInt());
         std::list<std::array<std::string, 3>> alignments = this->la->print_alignment(start, end);
-        /*QDialog dialog;
-        dialog.setModal(true);
-        dialog.exec();*/
         QString result = "";
         for (const std::array<std::string, 3> &alignment : alignments)
         {
@@ -147,8 +228,13 @@ void MainWindow::tableItemDoubleClicked(int row, int col)
 
 void MainWindow::populateTable(const std::list<Interval_Coordinate> &items)
 {
-    ui->tbl_result->clearContents();
     unsigned int size = items.size();
+    ui->lbl_count->setText("Total: " + QString::number(size));
+    //Progress diaglog
+    QProgressDialog progress("Data populating in progress...", "Cancel", 0, size-1, this);
+    progress.setMinimumDuration(100);
+    progress.setWindowModality(Qt::WindowModal);
+
     ui->tbl_result->setRowCount(size);
     unsigned int i = 0;
     for (const Interval_Coordinate &exon : items)
@@ -177,43 +263,87 @@ void MainWindow::populateTable(const std::list<Interval_Coordinate> &items)
         view_alignment->setTextAlignment(Qt::AlignCenter);
         view_alignment->setToolTip("Double click to view alignment");
         ui->tbl_result->setItem(i,3,  view_alignment);
+        progress.setValue(i);
         ++i;
     }
-    ui->lbl_count->setText("Total: " + QString::number(size));
+}
+
+void MainWindow::clearTable()
+{
+    ui->tbl_result->clearContents();
+    ui->tbl_result->setRowCount(0);
+    ui->lbl_count->setText("Total: 0");
+    ui->ptxt_alignment->clear();
 }
 
 void MainWindow::on_txt_UnknownDNAS_path_textChanged(const QString &arg1)
 {
-    this->reRunLA = true;
-    this->reRunEC = true;
+    if (this->sequence_path != arg1)
+    {
+        ui->btn_find_exons->setDisabled(true);
+    }
+    else
+    {
+        ui->btn_find_exons->setEnabled(true);
+    }
 }
 
 void MainWindow::on_txt_mRNA_path_textChanged(const QString &arg1)
 {
-    this->reRunLA = true;
-    this->reRunEC = true;
+    if (this->dna_path != arg1)
+    {
+        ui->btn_find_exons->setDisabled(true);
+    }
+    else
+    {
+        ui->btn_find_exons->setEnabled(true);
+    }
 }
 
 void MainWindow::on_spBox_match_valueChanged(int arg1)
 {
-    this->reRunLA = true;
-    this->reRunEC = true;
+    if (this->match != arg1)
+    {
+        ui->btn_find_exons->setDisabled(true);
+    }
+    else
+    {
+        ui->btn_find_exons->setEnabled(true);
+    }
 }
 
 void MainWindow::on_spBox_mismatch_valueChanged(int arg1)
 {
-    this->reRunLA = true;
-    this->reRunEC = true;
+    if (this->mismatch != arg1)
+    {
+        ui->btn_find_exons->setDisabled(true);
+    }
+    else
+    {
+        ui->btn_find_exons->setEnabled(true);
+    }
 }
 
 void MainWindow::on_spBox_gap_valueChanged(int arg1)
 {
-    this->reRunLA = true;
-    this->reRunEC = true;
+    if (this->gap != arg1)
+    {
+        ui->btn_find_exons->setDisabled(true);
+    }
+    else
+    {
+        ui->btn_find_exons->setEnabled(true);
+    }
 }
 
 void MainWindow::on_txt_threshold_textChanged(const QString &arg1)
 {
-    this->reRunLA = true;
-    this->reRunEC = true;
+    if (this->threshold != arg1)
+    {
+        ui->btn_find_exons->setDisabled(true);
+    }
+    else
+    {
+        ui->btn_find_exons->setEnabled(true);
+    }
 }

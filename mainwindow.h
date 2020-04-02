@@ -8,6 +8,8 @@
 #include <QDir>
 #include <QMessageBox>
 #include <QValidator>
+#include <QProgressDialog>
+#include <map>
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -44,8 +46,11 @@ private:
     Ui::MainWindow *ui;
     LocalAlignment *la = nullptr;
     ExonChaining *ec = nullptr;
-    bool reRunLA = true;
     bool reRunEC = true;
+    unsigned int tableValue = 0; // 0 initial, 1 la, 2 ec;
+    QString sequence_path, dna_path, threshold;
+    int match, mismatch, gap;
     void populateTable(const std::list<Interval_Coordinate> &items);
+    void clearTable();
 };
 #endif // MAINWINDOW_H

@@ -1,9 +1,5 @@
 #include "LocalAlignment.h"
 
-
-#include <iomanip>
-
-
 using namespace std;
 
 LocalAlignment::LocalAlignment()
@@ -11,23 +7,7 @@ LocalAlignment::LocalAlignment()
 
 }
 
-/*LocalAlignment::LocalAlignment(const LocalAlignment &la)
-{
-    this->exons = la.exons;
-    this->dna_sequence = la.dna_sequence;
-    this->dna_template = la.dna_template;
-    this->trace_matrix
-    this->trace_matrix = la.trace_matrix;
-    this->row_size = la.row_size;
-    this->col_size = la.col_size;
-    this->threshold = la.threshold;
-    this->match = la.match;
-    this->mismatch = la.mismatch;
-    this->match = la.match;
-    this->gap = la.gap;
-}*/
-
-LocalAlignment::LocalAlignment(const string &dna_template, const string &dna_sequence, const int &match, const int &mismatch, const int &gap, const int &threshold)
+LocalAlignment::LocalAlignment(const string &dna_template, const string &dna_sequence, const int &match, const int &mismatch, const int &gap, const int &threshold, QProgressDialog &p)
 {
     //this->read_config("var.config");
 	this->dna_template = dna_template;
@@ -39,16 +19,26 @@ LocalAlignment::LocalAlignment(const string &dna_template, const string &dna_seq
 	this->row_size = dna_template.length() + 1;
 	this->col_size = dna_sequence.length() + 1;
 	unsigned int **scores_matrix = new unsigned int *[this->row_size];
-	unordered_set<Coordinate> **origins_matrix = new unordered_set<Coordinate> *[this->row_size];
-	this->trace_matrix = new unsigned int *[this->row_size];
+    unordered_set<Coordinate> **origins_matrix = new unordered_set<Coordinate> *[this->row_size];
+	this->trace_matrix = new unsigned int *[this->row_size];   
 
+
+    unsigned int numTask = 0;
+    bool cancelled = false;
 	//fill the rest of matrix by dynamic programming local alignment
 	for (unsigned int row = 0; row < this->row_size; ++row)
 	{
+        if (cancelled)
+        {
+            delete[] scores_matrix;
+            delete[] origins_matrix;
+            break;
+        }
 		//auto start = chrono::high_resolution_clock::now();
 		scores_matrix[row] = new unsigned int[this->col_size];
-		origins_matrix[row] = new unordered_set<Coordinate>[this->col_size];
+        origins_matrix[row] = new unordered_set<Coordinate>[this->col_size];
 		trace_matrix[row] = new unsigned int[this->col_size];
+        num_row_executed = row;
 
 		//rolling delete used/obsolete rows
 		if (row >= 2)
@@ -59,6 +49,15 @@ LocalAlignment::LocalAlignment(const string &dna_template, const string &dna_seq
 
 		for (unsigned int col = 0; col < this->col_size; ++col)
 		{
+            if (p.wasCanceled())
+            {
+                cancelled = true;
+                delete[] scores_matrix[row];
+                delete[] scores_matrix[row-1];
+                delete[] origins_matrix[row];
+                delete[] origins_matrix[row-1];
+                break;
+            }
 
 			//initialize first row and column to be 0
 			if (row == 0 || col == 0)
@@ -83,21 +82,21 @@ LocalAlignment::LocalAlignment(const string &dna_template, const string &dna_seq
 			if (score == vertical_score)
 			{
 				trace_matrix[row][col] += VERTICAL_PATH;
-				if (origins_matrix[row - 1][col].empty()) origins_matrix[row][col].insert(Coordinate(row, col));
-				else origins_matrix[row][col].insert(origins_matrix[row - 1][col].cbegin(), origins_matrix[row - 1][col].cend());
+                if (origins_matrix[row - 1][col].empty()) origins_matrix[row][col].insert(Coordinate(row, col));
+                else origins_matrix[row][col].insert(origins_matrix[row - 1][col].cbegin(), origins_matrix[row - 1][col].cend());
 			}
 			if (score == diagonal_score)
 			{
 				trace_matrix[row][col] += DIAGONAL_PATH;
-				if (origins_matrix[row - 1][col - 1].empty()) origins_matrix[row][col].insert(Coordinate(row, col));
-				else origins_matrix[row][col].insert(origins_matrix[row - 1][col - 1].cbegin(), origins_matrix[row - 1][col - 1].cend());
+                if (origins_matrix[row - 1][col - 1].empty()) origins_matrix[row][col].insert(Coordinate(row, col));
+                else origins_matrix[row][col].insert(origins_matrix[row - 1][col - 1].cbegin(), origins_matrix[row - 1][col - 1].cend());
 			}
 			if (score == horizontal_score)
 			{
 				trace_matrix[row][col] += HORIZONTAL_PATH;
-				if (origins_matrix[row][col - 1].empty()) origins_matrix[row][col].insert(Coordinate(row, col));
-				else origins_matrix[row][col].insert(origins_matrix[row][col - 1].cbegin(), origins_matrix[row][col - 1].cend());
-			}
+                if (origins_matrix[row][col - 1].empty()) origins_matrix[row][col].insert(Coordinate(row, col));
+                else origins_matrix[row][col].insert(origins_matrix[row][col - 1].cbegin(), origins_matrix[row][col - 1].cend());
+            }
 
 			if (score >= this->threshold)
 			{
@@ -106,19 +105,26 @@ LocalAlignment::LocalAlignment(const string &dna_template, const string &dna_seq
 					this->exons.push_back(Interval_Coordinate(Coordinate(elem.row, elem.col), Coordinate(row, col), score));
 				}
 			}
+            p.setValue(numTask);
+            ++numTask;
 		}		
 	}
-	for (int k = 1; k < 3; ++k)
-	{
-		delete[] scores_matrix[this->row_size - k];
-		delete[] origins_matrix[this->row_size - k];
-	}
-	delete[] scores_matrix;
-	delete[] origins_matrix;
+
+    if (!cancelled)
+    {
+        for (int k = 1; k < 3; ++k)
+        {
+            delete[] scores_matrix[this->row_size - k];
+            delete[] origins_matrix[this->row_size - k];
+        }
+        delete[] scores_matrix;
+        delete[] origins_matrix;
+    }
+
 }
 LocalAlignment::~LocalAlignment()
 {
-	for (unsigned int row = 0; row < this->row_size; ++row)
+    for (unsigned int row = 0; row <= num_row_executed; ++row)
 	{
 		delete[] this->trace_matrix[row];
 	}
