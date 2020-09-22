@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include <QDebug>
+#include <chrono>
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
@@ -86,9 +87,14 @@ void MainWindow::on_btn_align_clicked()
         clearTable();
         if (this->la) delete this->la;
         //98% progress
+        auto start = std::chrono::high_resolution_clock::now();
         this->la = new LocalAlignment(dna_template.toStdString(), dna_sequence.toStdString(),
                                       ui->spBox_match->value(), ui->spBox_mismatch->value(),
                                       ui->spBox_gap->value(), ui->txt_threshold->text().toInt(), progress);
+        auto end = std::chrono::high_resolution_clock::now();
+            double time_taken = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+            time_taken *= 1e-9;
+        qDebug() << "local alignment: " << time_taken << " seconds" << endl;
         if (!progress.wasCanceled())
         {
             if (la->getExons().size() ==0)
@@ -152,7 +158,12 @@ void MainWindow::on_btn_find_exons_clicked()
 
         clearTable();
         if (this->ec) delete this->ec;
+        auto start = std::chrono::high_resolution_clock::now();
         this->ec = new ExonChaining(this->la->getExons(), progress);
+        auto end = std::chrono::high_resolution_clock::now();
+            double time_taken = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+            time_taken *= 1e-9;
+        qDebug() << "exon chaining: " << time_taken << " seconds" << endl;
         progress.setValue(100);
         if (ec->get_intervals().size() == 0)
         {
@@ -234,11 +245,14 @@ void MainWindow::populateTable(const std::list<Interval_Coordinate> &items)
     QProgressDialog progress("Data populating in progress...", "Cancel", 0, size-1, this);
     progress.setMinimumDuration(100);
     progress.setWindowModality(Qt::WindowModal);
-
     ui->tbl_result->setRowCount(size);
     unsigned int i = 0;
     for (const Interval_Coordinate &exon : items)
     {
+        if (progress.wasCanceled())
+        {
+            clearTable();
+        }
         QString start = QString::number(exon.start.row) + "-" + QString::number(exon.start.col);
         QTableWidgetItem *start_item = new QTableWidgetItem(start);
         start_item->setTextAlignment(Qt::AlignCenter);

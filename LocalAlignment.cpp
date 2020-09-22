@@ -1,5 +1,5 @@
 #include "LocalAlignment.h"
-
+#include <chrono>
 using namespace std;
 
 LocalAlignment::LocalAlignment()
