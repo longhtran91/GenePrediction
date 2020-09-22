@@ -15,3 +15,5 @@
    1. Score: score of the alignment from the scoring scheme
    1. View Alignment: double click to display the alignment in the plain textfield below
 1. Alignment: to display the selected alignment
+
+Demo: Download GPSA.zip and run GenePrediction.exe
